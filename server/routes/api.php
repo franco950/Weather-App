@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 //converts celcius to farenheight
@@ -26,17 +27,41 @@ function getCoordinates(string $city):array{
                     'status' => $geoResponse->status()];
         }
         $geoData = $geoResponse->json();
-
-        if (empty($geoData) || empty($geoData[0])) {
+        //check for no result, empty response and incomplete city match
+        if (empty($geoData) || empty($geoData[0])|| strcasecmp($geoData[0]['name'], $city) !== 0) {
             return ['error' => true, 
-                    'message' => 'No location found for the given city'];
+                    'message' => 'No location found for the given input'];
         }
 
         $lat = $geoData[0]['lat'];
         $lon = $geoData[0]['lon'];
+  
         return [$lat,$lon];
     }
+//get city name using the coordinates
+function getCityFromCoordinates(float $lat, float $lon): ?string {
+    $apiKey = env('OPENWEATHER_API_KEY');
 
+    $response = Http::get('http://api.openweathermap.org/geo/1.0/reverse', [
+        'lat' => $lat,
+        'lon' => $lon,
+        'limit' => 1,
+        'appid' => $apiKey,
+    ]);
+
+    if (!$response->successful()) {
+        return null;
+    }
+
+    $data = $response->json();
+
+    if (!empty($data[0]['name'])) {
+        return $data[0]['name']; 
+    }
+
+    return null;
+}
+    
 // gets weather data using coordinates
 function getWeather($lat,$lon){
     $apiKey = config('services.openweather.key');
@@ -62,6 +87,7 @@ function getWeather($lat,$lon){
         ], $weatherResponse->status());
     }
     $data = $weatherResponse->json();
+
     return $data;
 }
 //selects the relevant data and arranges it
@@ -102,17 +128,30 @@ function processData( $data,string $city):array{
     }, array_slice($daily, 1, 3)), 
 ];
 }
+//stores a cache for each city for 10 minutes ...since the data only changes every 10 minutes
+function getCachedWeather($lat,$lon, string $city, int $minutes = 10) {
+
+    $cacheKey = 'weather_' . md5($city . implode(',', [$lat,$lon]));
+    return Cache::remember($cacheKey, now()->addMinutes($minutes), function () use ($lat,$lon) {
+        return getWeather($lat,$lon);
+    });
+}
 
 Route::get('/weather', function () {
     //extracting current latitude and longitude
     $lat = request()->query('lat');
     $lon = request()->query('lon');
 
-    //default city is Nairobi if no city parameters are sent
-    $city = Str::title(request()->query('city', 'Nairobi'));
 
-    //getting coordinates for city if there are no coordinates
-    if (!$lat || !$lon) {
+    //default city is Nairobi if unable to get city from params or coordinates
+    $city = Str::title(request()->query('city'));
+    if (!$city && $lat && $lon){
+        $city=getCityFromCoordinates($lat,$lon);
+    }
+    
+    //getting coordinates for city if there are no coordinates, default city is Nairobi
+    $city = $city ?: 'Nairobi';
+    if ($city&& (!$lat || !$lon)) {
         $coordinates=getCoordinates($city);
         
         if (!empty( $coordinates['error'])) {
@@ -125,8 +164,9 @@ Route::get('/weather', function () {
         [$lat, $lon] = $coordinates;
         
     }
-    //getting weather data for coordinates
-    $data=getWeather($lat,$lon);
+    
+    //getting weather data for coordinates and caching it
+    $data = getCachedWeather($lat,$lon,$city);
 
     if (!empty( $data['error'])) {
         return response()->json([
@@ -138,5 +178,5 @@ Route::get('/weather', function () {
     //select and arrange relevant data 
     $result=processData($data,$city);
 
-    return $result;    
+    return $result;
 });
