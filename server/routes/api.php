@@ -125,7 +125,7 @@ function processData( $data,string $city):array{
             'description' => $day['weather'][0]['description'] ?? '',
             'icon' => $day['weather'][0]['icon'] ?? '',
         ];
-    }, array_slice($daily, 1, 3)), 
+    },$daily), 
 ];
 }
 //stores a cache for each city for 10 minutes ...since the data only changes every 10 minutes

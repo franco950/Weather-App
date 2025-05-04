@@ -1,15 +1,34 @@
-const API_BASE_URL = 'http://127.0.0.1:8000/api/weather?city='; 
-const fetchWeather = async (queryParam:string,setData:any,setLoading:any) => {
+type FetchParams = {
+  city?: string;
+  lat?: number;
+  lon?: number;
+};
+
+export default async function fetchWeather(
+  { city, lat, lon }: FetchParams,
+  setData: Function,
+  setLoading: Function,
+  setError: Function
+) {
   try {
     setLoading(true);
-    const res = await fetch(`${API_BASE_URL}${queryParam}`);
-    if (!res.ok) throw new Error(`${res}`);
-    const result = await res.json();
-    setData(result);
-  } catch (err) {
-    console.error('Error fetching weather:', err);
+    setError("");
+
+    const query = city
+      ? `city=${encodeURIComponent(city)}`
+      : `lat=${lat}&lon=${lon}`;
+
+    const res = await fetch(`http://127.0.0.1:8000/api/weather?${query}`);
+    if (!res.ok) {
+      console.log(res)
+      throw new Error("Failed to fetch weather data.");
+    }
+    const weather = await res.json();
+    setData(weather);
+  } catch (err: any) {
+    setError(err.message || "An error occurred.");
+    setData(null);
   } finally {
     setLoading(false);
   }
-};
-export default fetchWeather
+}
